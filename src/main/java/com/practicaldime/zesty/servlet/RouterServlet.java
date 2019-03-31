@@ -5,15 +5,15 @@ import java.util.concurrent.CompletableFuture;
 public class RouterServlet extends HandlerServletAsync {
 
 	private static final long serialVersionUID = 1L;
-	private Middleware<HandlerContext> router; 
+	private Middleware<RequestContext> router; 
 
-	public RouterServlet(Middleware<HandlerContext> router) {
-		super();
+	public RouterServlet(MiddlewareChain<RequestContext> chain, Middleware<RequestContext> router) {
+		super(chain);
 		this.router = router;
 	}
 
 	@Override
-	public CompletableFuture<HandlerContext> handler(HandlerContext context) {
+	public CompletableFuture<RequestContext> handler(RequestContext context) {
 		return router.apply(context);
 	}
 }

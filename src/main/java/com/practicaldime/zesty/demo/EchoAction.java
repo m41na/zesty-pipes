@@ -3,9 +3,9 @@ package com.practicaldime.zesty.demo;
 import java.util.concurrent.CompletableFuture;
 
 import com.practicaldime.zesty.servlet.AbstractMiddleware;
-import com.practicaldime.zesty.servlet.HandlerContext;
+import com.practicaldime.zesty.servlet.RequestContext;
 
-public class EchoAction extends AbstractMiddleware<HandlerContext>{
+public class EchoAction extends AbstractMiddleware<RequestContext>{
 
 	@Override
 	public String getName() {
@@ -13,7 +13,7 @@ public class EchoAction extends AbstractMiddleware<HandlerContext>{
 	}
 
 	@Override
-	public CompletableFuture<HandlerContext> apply(HandlerContext context) {
+	public CompletableFuture<RequestContext> apply(RequestContext context) {
 		return CompletableFuture.supplyAsync(() -> context);
 	}
 }

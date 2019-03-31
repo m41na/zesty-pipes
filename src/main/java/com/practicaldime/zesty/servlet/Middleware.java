@@ -1,6 +1,7 @@
 package com.practicaldime.zesty.servlet;
 
 import java.util.concurrent.CompletableFuture;
+import java.util.function.BiFunction;
 
 public interface Middleware<T> extends HandlerAction<T, T> {
 
@@ -13,6 +14,10 @@ public interface Middleware<T> extends HandlerAction<T, T> {
 	void setPrev(Middleware<T> prev);
 
 	Middleware<T> getPrev();
+	
+	CompletableFuture<T> onCompleted(T value);
+	
+	BiFunction<T, Throwable, T> onException(T value);
 
 	default Middleware<T> find(String name){
 		Middleware<T> current = this;
@@ -26,15 +31,8 @@ public interface Middleware<T> extends HandlerAction<T, T> {
 	}
 
 	default CompletableFuture<T> onNext(Middleware<T> handler, T value) {
-		return apply(value).handle((res, th) -> {
-			if (res != null) {
-				return res;
-			} else {
-				System.out.println(th.getMessage());
-				return null;
-			}
-		}).thenCompose(res -> handler != null 
+		return apply(value).thenCompose(res -> handler != null 
 				? handler.onNext(handler.getNext(), res)
-				: CompletableFuture.completedFuture(res));
+				: onCompleted(res)).handle(onException(value)::apply);
 	}
 }

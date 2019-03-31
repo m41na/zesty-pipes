@@ -18,10 +18,13 @@ public class DemoApp {
 		String host = "localhost";
 
 		Map<String, String> props = new HashMap<>();
-		props.put("appctx", "/app");
-		props.put("assets", "");
+		props.put("appctx", "/");
+		props.put("assets", "www");
 
-		AppServer app = new AppServer(props);
+		AppServer app = new AppServer(props)
+				.router()
+				.route("get", "/api/hello", new HelloAction())
+				.route("post", "/api/echo", new EchoAction());
 
 		app.listen(port, host, (msg)-> LOG.info(msg));
 	}

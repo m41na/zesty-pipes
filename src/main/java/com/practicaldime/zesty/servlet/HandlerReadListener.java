@@ -10,13 +10,17 @@ import javax.servlet.ServletInputStream;
 import javax.servlet.ServletOutputStream;
 import javax.servlet.WriteListener;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+
 public class HandlerReadListener implements ReadListener {
 
+	private static final Logger LOG = LoggerFactory.getLogger(HandlerReadListener.class);
 	private ServletInputStream input = null;
-	private HandlerAction<ByteBuffer, HandlerContext> action = null;
+	private HandlerAction<ByteBuffer, RequestContext> action = null;
 	private ByteArrayOutputStream stream = new ByteArrayOutputStream();
 
-	public HandlerReadListener(ServletInputStream input, HandlerAction<ByteBuffer, HandlerContext> action) {
+	public HandlerReadListener(ServletInputStream input, HandlerAction<ByteBuffer, RequestContext> action) {
 		super();
 		this.input = input;
 		this.action = action;
@@ -34,32 +38,46 @@ public class HandlerReadListener implements ReadListener {
 
 	@Override
 	public void onAllDataRead() throws IOException {
-		System.out.println("Data is all read");
+		LOG.info("Data is all read");
 		
 		CompletableFuture<ByteArrayOutputStream> data = CompletableFuture.supplyAsync(()->stream);
 		
 		data.thenApply(stream -> ByteBuffer.wrap(stream.toByteArray()))
 		.thenCompose(bytes -> action.apply(bytes))
-		.thenApply(context -> {
-			// now handler is finished, set up a WriteListener to respond
-			
+		.handle((context, th) -> {
+			if(th != null) {
+				th.printStackTrace(System.err);
+				context.getResp().setStatus(500);
+				try {
+					ByteBuffer bytes = ByteBuffer.wrap(th.getMessage().getBytes());
+					ServletOutputStream output = context.getResp().getOutputStream();
+					WriteListener writeListener = new HandlerWriteListener(bytes, context.getAsync(), output);
+					output.setWriteListener(writeListener);
+				}
+				catch(IOException e) {
+					LOG.error("***********{}", e.getMessage());
+				}
+				finally {
+					context.getAsync().complete();
+				}
+			}
+			return context;
+		})
+		.thenAccept(context -> {
+			context.getResp().setStatus(200);
 			try {
 				ByteBuffer bytes = context.get("DATA", ByteBuffer.class);
 				ServletOutputStream output = context.getResp().getOutputStream();
 				WriteListener writeListener = new HandlerWriteListener(bytes, context.getAsync(), output);
 				output.setWriteListener(writeListener);
-				return context;
 			} catch (IOException e) {
-				throw new RuntimeException(e);
+				LOG.error("***********{}", e.getMessage());
 			}
-			
-		}).handle((context, th) -> {
-			th.printStackTrace(System.out);
-			context.getResp().setStatus(500);
-			context.getAsync().complete();
-			return CompletableFuture.failedFuture(th);
-		})
-		.complete(null);
+			finally {
+				context.getAsync().complete();
+				LOG.info("*****************request completed");
+			}
+		});
 	}
 
 	@Override

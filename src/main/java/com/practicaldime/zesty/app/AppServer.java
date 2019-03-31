@@ -10,8 +10,10 @@ import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Consumer;
+import java.util.function.Function;
+import java.util.function.Supplier;
 
-import javax.servlet.http.HttpServletRequest;
+import javax.servlet.http.HttpServlet;
 
 import org.eclipse.jetty.server.Handler;
 import org.eclipse.jetty.server.Server;
@@ -29,28 +31,50 @@ import org.eclipse.jetty.util.thread.ScheduledExecutorScheduler;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import com.practicaldime.zesty.demo.EchoAction;
-import com.practicaldime.zesty.demo.HelloAction;
+import com.practicaldime.zesty.basics.AppRouter;
+import com.practicaldime.zesty.basics.AppViewEngines;
+import com.practicaldime.zesty.router.MethodRouter;
+import com.practicaldime.zesty.router.Route;
+import com.practicaldime.zesty.router.Router;
 import com.practicaldime.zesty.servlet.AbstractMiddleware;
-import com.practicaldime.zesty.servlet.HandlerContext;
+import com.practicaldime.zesty.servlet.HandlerConfig;
 import com.practicaldime.zesty.servlet.Middleware;
 import com.practicaldime.zesty.servlet.MiddlewareChain;
+import com.practicaldime.zesty.servlet.RequestContext;
+import com.practicaldime.zesty.servlet.RouteResolver;
 import com.practicaldime.zesty.servlet.RouterServlet;
+import com.practicaldime.zesty.view.ViewEngine;
+import com.practicaldime.zesty.view.ViewEngineFactory;
 
 public class AppServer {
 	
 	private static final Logger LOG = LoggerFactory.getLogger(AppServer.class);
 	private Server server;
-	//private AppRouter routes;
+	private AppRouter routes;
 	private String status = "stopped";
+	private static ViewEngine engine;
 	private final Properties locals = new Properties();
+	@SuppressWarnings("unused")
+	private final ThreadPoolExecutor threadPoolExecutor;
 	private final Map<String, String> corscontext = new HashMap<>();
 	private final LifecycleSubscriber lifecycle = new LifecycleSubscriber();
+	private final MiddlewareChain<RequestContext> chain = new MiddlewareChain<>();
+	private final Map<String, Middleware<RequestContext>> handlers = new HashMap<>();
+	private final ViewEngineFactory engineFactory = new AppViewEngines();
 	private final ServletContextHandler servlets = new ServletContextHandler(ServletContextHandler.SESSIONS);
 	
 	public AppServer(Map<String, String> props) {
 		this.assets(Optional.ofNullable(props.get("assets")).orElse("www"));
 		this.appctx(Optional.ofNullable(props.get("appctx")).orElse("/"));
+		this.engine(Optional.ofNullable(props.get("engine")).orElse("*"));
+		this.threadPoolExecutor = createThreadPoolExecutor();
+	}
+	
+	public static ViewEngine engine() {
+		if (engine == null) {
+			throw new RuntimeException("The engine is not yet initialized");
+		}
+		return engine;
 	}
 	
 	public String status() {
@@ -63,6 +87,21 @@ public class AppServer {
 
 	public final void assets(String path) {
 		this.locals.put("assets", path);
+	}
+	
+	public final void engine(String view) {
+		switch (view) {
+		case "jtwig":
+			engine = engineFactory.engine(view, locals.getProperty("assets"), "html");
+			break;
+		case "freemarker":
+			engine = engineFactory.engine(view, locals.getProperty("assets"), "ftl");
+			break;
+		default:
+			LOG.error("specified engine not supported. defaulting to 'none' instead");
+			engine = engineFactory.engine(view, locals.getProperty("assets"), "");
+		}
+		this.locals.put("engine", view);
 	}
 	
 	public String resolve(String path) {
@@ -94,28 +133,429 @@ public class AppServer {
 		return this;
 	}
 	
-//	public AppServer router() {
-//		this.routes = new AppRouter(new MethodRouter());
-//		return this;
+	public AppServer router() {
+		this.routes = new AppRouter(new MethodRouter());
+		return this;
+	}
+	
+	public AppServer router(Supplier<Router> supplier) {
+		this.routes = new AppRouter(supplier.get());
+		return this;
+	}
+
+//	public AppServer filter(HandlerFilter filter) {
+//		return filter("/*", filter);
 //	}
-//	
-//	public AppServer router(Supplier<Router> supplier) {
-//		this.routes = new AppRouter(supplier.get());
+//
+//	public AppServer filter(String context, HandlerFilter filter) {
+//		FilterHolder holder = new FilterHolder(filter);
+//		servlets.addFilter(holder, context, EnumSet.of(DispatcherType.REQUEST));
 //		return this;
 //	}
 	
-	public static MiddlewareChain<HandlerContext> chain() {
-		MiddlewareChain<HandlerContext> chain = new MiddlewareChain<>();
-		chain.register(createRouter(temporaryRoutes()));
-		return chain;
+	public AppServer servlet(String path, HandlerConfig config, HttpServlet handler) {
+		Route route = new Route(resolve(path), "all", "*", "*");
+		route.setId();
+		routes.addRoute(route);
+		// add servlet handler
+		ServletHolder holder = new ServletHolder(handler);
+		if(config != null) config.configure(holder);
+		servlets.addServlet(holder, route.rid);
+		return this;
 	}
 	
-	public static Map<String, Middleware<HandlerContext>> temporaryRoutes(){
-		Map<String, Middleware<HandlerContext>> routes = new HashMap<>();		
-		routes.put("/app/hello", new HelloAction());
-		routes.put("/app/echo", new EchoAction());
-		return routes;
+	public AppServer route(String method, String path, Middleware<RequestContext> handler) {
+		switch (method.toLowerCase()) {
+		case "get":
+			return get(path, "", "", handler);
+		case "post":
+			return post(path, "", "", handler);
+		case "put":
+			return put(path, "", "", handler);
+		case "delete":
+			return delete(path, "", "", handler);
+		case "options":
+			return options(path, "", "", handler);
+		case "trace":
+			return trace(path, "", "", handler);
+		case "head":
+			return head(path, "", "", handler);
+		case "all":
+			return all(path, "", "", handler);
+		default:
+			throw new UnsupportedOperationException(method + " is not a supported method");
+		}
 	}
+	
+	// ************* HEAD *****************//
+	public AppServer head(String path, Middleware<RequestContext> handler) {
+		return head(path, "", "", handler);
+	}
+
+	public AppServer head(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return head(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("head_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer head(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return head(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("head_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer head(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "head", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		//add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* TRACE *****************//
+	public AppServer trace(String path, Middleware<RequestContext> handler) {
+		return trace(path, "", "", handler);
+	}
+
+	public AppServer trace(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return trace(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("trace_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer trace(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return trace(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("trace_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer trace(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "trace", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* OPTIONS *****************//
+	public AppServer options(String path, Middleware<RequestContext> handler) {
+		return options(path, "", "", handler);
+	}
+
+	public AppServer options(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return options(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("options_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer options(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return options(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("options_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer options(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "options", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* GET *****************//
+	public AppServer get(String path, Middleware<RequestContext> handler) {
+		return get(path, "", "", handler);
+	}
+
+	public AppServer get(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return get(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("get_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer get(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return get(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("get_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer get(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "get", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* POST *****************//
+	public AppServer post(String path, Middleware<RequestContext> handler) {
+		return post(path, "", "", handler);
+	}
+
+	public AppServer post(String path,  Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return post(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("post_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer post(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return post(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("post_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer post(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "post", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* PUT *****************//
+	public AppServer put(String path, Middleware<RequestContext> handler) {
+		return put(path, "", "", handler);
+	}
+
+	public AppServer put(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return put(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("put_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer put(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return put(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("put_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer put(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "put", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* DELETE *****************//
+	public AppServer delete(String path, Middleware<RequestContext> handler) {
+		return delete(path, "", "", handler);
+	}
+
+	public AppServer delete(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return delete(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("delete_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer delete(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return delete(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("delete_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer delete(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "delete", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+	// ************* ALL *****************//
+	public AppServer all(String path, Middleware<RequestContext> handler) {
+		return all(path, "", "", handler);
+	}
+
+	public AppServer all(String path, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return all(path, "", "", new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("all_%s", path);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer all(String path, String accept, String type, Function<RequestContext, CompletableFuture<RequestContext>> handler) {
+		return all(path, accept, type, new AbstractMiddleware<RequestContext>() {
+
+			@Override
+			public String getName() {
+				return String.format("all_%s_accept_%s_type_%s", path, accept, type);
+			}
+
+			@Override
+			public CompletableFuture<RequestContext> apply(RequestContext context) {
+				return handler.apply(context);
+			}
+		});
+	}
+
+	public AppServer all(String path, String accept, String type, Middleware<RequestContext> handler) {
+		Route route = new Route(resolve(path), "all", accept, type);
+		route.setId();
+		routes.addRoute(route);
+		// add handler
+		handlers.put(route.rid, handler);
+		return this;
+	}
+
+//	// ************* WEBSOCKETS *****************//
+//	public AppServer websocket(String ctx, AppWsProvider provider) {
+//		// Add a websocket to a specific path spec
+//		ServletHolder holderEvents = new ServletHolder("ws-events", new AppWsServlet(provider));
+//		servlets.addServlet(holderEvents, ctx);
+//		return this;
+//	}
+//
+//	// ************* WORDPRESS *****************//
+//	public AppServer wordpress(String home, String proxyTo) {
+//		this.wpcontext.put("activate", "true");
+//		this.wpcontext.put("resourceBase", home);
+//		this.wpcontext.put("welcomeFile", "index.php");
+//		this.wpcontext.put("proxyTo", proxyTo);
+//		this.wpcontext.put("scriptRoot", home);
+//		return this;
+//	}
 	
 	// ************* START *****************//
 	public void listen(int port, String host) {
@@ -166,6 +606,8 @@ public class AppServer {
 //				corsMapping.setPathSpec("*");
 //				servlets.addFilter(corsFilter, "/*", EnumSet.of(DispatcherType.INCLUDE, DispatcherType.REQUEST));
 //			}
+			// add routes filter
+			//servlets.addFilter(new FilterHolder(new RouteFilter(this.routes)), "/*", EnumSet.of(DispatcherType.REQUEST));
 
 			// configure resource handlers
 			String resourceBase = this.locals.getProperty("assets");
@@ -178,14 +620,13 @@ public class AppServer {
 			ServletHolder defaultServlet = createResourceServlet(resourceBase);
 			servlets.addServlet(defaultServlet, "/*");
 			
-			// configure router
-//			Middleware<HandlerContext> router = createRouter(temporaryRoutes());
-//			chain.register(router);
+			// configure route resolver
+			Middleware<RequestContext> router = new RouteResolver(this.routes, this.handlers);
 			
 			//configure routes servlet
-			ServletHolder routeHolder = new ServletHolder(RouterServlet.class);
+			ServletHolder routeHolder = new ServletHolder(new RouterServlet(chain, router));
 			routeHolder.setAsyncSupported(true);
-			servlets.addServlet(routeHolder, appctx);
+			servlets.addServlet(routeHolder, "/api/*");
 			
 			// configure ResourceHandler to serve static files
 			ResourceHandler appResources = createResourceHandler(resourceBase);
@@ -241,29 +682,6 @@ public class AppServer {
 		defaultServlet.setInitParameter("dirAllowed", "false");
 		return defaultServlet;
 	}
-	
- 	public static Middleware<HandlerContext> createRouter(Map<String, Middleware<HandlerContext>> routes){ 		
- 		return new AbstractMiddleware<HandlerContext>() {
-
- 			@Override
- 			public String getName() {
- 				return "routing handler";
- 			}
-
- 			@Override
- 			public CompletableFuture<HandlerContext> apply(HandlerContext context) {
- 				HttpServletRequest req = context.getReq();
- 				String url = req.getRequestURI();
- 				System.out.printf("URL DETECTED %s%n", url);
- 				Middleware<HandlerContext> route = routes.get(url);
- 				if (route != null) {
- 					return route.apply(context);
- 				} else {
- 					return CompletableFuture.failedFuture(new RuntimeException("requested path does not exist"));
- 				}
- 			}
- 		};
- 	}
 	
 	private void addRuntimeShutdownHook(final Server server) {
 		Runtime.getRuntime().addShutdownHook(new Thread(() -> {

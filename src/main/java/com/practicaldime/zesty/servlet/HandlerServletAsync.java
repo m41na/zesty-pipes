@@ -12,14 +12,22 @@ import javax.servlet.http.HttpServlet;
 import javax.servlet.http.HttpServletRequest;
 import javax.servlet.http.HttpServletResponse;
 
-import com.practicaldime.zesty.app.AppServer;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 public abstract class HandlerServletAsync extends HttpServlet {
 
 	private static final long serialVersionUID = 1L;
+	
+	private static final Logger LOG = LoggerFactory.getLogger(HandlerServletAsync.class);
 
-	public abstract CompletableFuture<HandlerContext> handler(HandlerContext context);
-	private MiddlewareChain<HandlerContext> chain = AppServer.chain();
+	public abstract CompletableFuture<RequestContext> handler(RequestContext context);
+	private final MiddlewareChain<RequestContext> chain;
+
+	public HandlerServletAsync(MiddlewareChain<RequestContext> chain) {
+		super();
+		this.chain = chain;
+	}
 
 	@Override
 	protected void doTrace(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
@@ -62,10 +70,10 @@ public abstract class HandlerServletAsync extends HttpServlet {
 	protected void doProcess(HttpServletRequest req, HttpServletResponse resp) throws ServletException, IOException {
 		AsyncContext async = req.startAsync();
 		ServletInputStream input = req.getInputStream();
-		HandlerAction<ByteBuffer, HandlerContext> action = data -> {
-			HandlerContext context = new HandlerContext(req, resp, async);
+		HandlerAction<ByteBuffer, RequestContext> action = data -> {
+			RequestContext context = new RequestContext(req, resp, async);
 			context.set("DATA", data);
-			System.out.printf("*********doProcess(): starting chain for %s%n", req.getRequestURI());			
+			LOG.info("*********doProcess(): starting chain for {}", req.getRequestURI());			
 			//return CompletableFuture.supplyAsync(() -> context).thenCompose(ctx -> handler(ctx));
 			return chain.start(context).thenCompose(ctx -> handler(ctx));
 		};
