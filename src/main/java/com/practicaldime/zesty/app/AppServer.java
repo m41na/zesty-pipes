@@ -617,8 +617,8 @@ public class AppServer {
 			servlets.setContextPath(appctx);
 
 			// configure default servlet for app context
-			ServletHolder defaultServlet = createResourceServlet(resourceBase);
-			servlets.addServlet(defaultServlet, "/*");
+//			ServletHolder defaultServlet = createResourceServlet(resourceBase);
+//			servlets.addServlet(defaultServlet, "/*");
 			
 			// configure route resolver
 			Middleware<RequestContext> router = new RouteResolver(this.routes, this.handlers);
@@ -626,7 +626,7 @@ public class AppServer {
 			//configure routes servlet
 			ServletHolder routeHolder = new ServletHolder(new RouterServlet(chain, router));
 			routeHolder.setAsyncSupported(true);
-			servlets.addServlet(routeHolder, "/api/*");
+			servlets.addServlet(routeHolder, "/*");
 			
 			// configure ResourceHandler to serve static files
 			ResourceHandler appResources = createResourceHandler(resourceBase);

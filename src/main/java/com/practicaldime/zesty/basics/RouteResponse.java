@@ -1,6 +1,7 @@
 package com.practicaldime.zesty.basics;
 
 import java.io.Reader;
+import java.nio.ByteBuffer;
 import java.util.Map;
 
 public interface RouteResponse {
@@ -21,7 +22,9 @@ public interface RouteResponse {
     
     void send(String payload);
     
-    void bytes(byte[] payload);
+    void send(byte[] payload);
+    
+    void send(ByteBuffer payload);
     
     void json(Object payload);
     

@@ -1,11 +1,11 @@
-package com.practicaldime.zesty.filter;
+package com.practicaldime.zesty.chain;
 
 import java.util.concurrent.CompletableFuture;
 
 import com.practicaldime.zesty.servlet.AbstractMiddleware;
 import com.practicaldime.zesty.servlet.RequestContext;
 
-public class MultipartFilter extends AbstractMiddleware<RequestContext>{
+public class UploadFileFilter extends AbstractMiddleware<RequestContext>{
 
 	@Override
 	public String getName() {

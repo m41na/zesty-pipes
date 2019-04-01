@@ -23,8 +23,8 @@ public class DemoApp {
 
 		AppServer app = new AppServer(props)
 				.router()
-				.route("get", "/api/hello", new HelloAction())
-				.route("post", "/api/echo", new EchoAction());
+				.route("get", "/hello", new HelloAction())
+				.route("post", "/echo", new EchoAction());
 
 		app.listen(port, host, (msg)-> LOG.info(msg));
 	}

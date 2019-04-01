@@ -57,25 +57,18 @@ public class HandlerReadListener implements ReadListener {
 				catch(IOException e) {
 					LOG.error("***********{}", e.getMessage());
 				}
-				finally {
-					context.getAsync().complete();
-				}
 			}
 			return context;
 		})
 		.thenAccept(context -> {
 			context.getResp().setStatus(200);
 			try {
-				ByteBuffer bytes = context.get("DATA", ByteBuffer.class);
+				ByteBuffer bytes = context.getResp().content;
 				ServletOutputStream output = context.getResp().getOutputStream();
 				WriteListener writeListener = new HandlerWriteListener(bytes, context.getAsync(), output);
 				output.setWriteListener(writeListener);
 			} catch (IOException e) {
 				LOG.error("***********{}", e.getMessage());
-			}
-			finally {
-				context.getAsync().complete();
-				LOG.info("*****************request completed");
 			}
 		});
 	}

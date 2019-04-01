@@ -8,6 +8,7 @@ import java.io.FileReader;
 import java.io.IOException;
 import java.io.Reader;
 import java.io.StringWriter;
+import java.nio.ByteBuffer;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -35,7 +36,7 @@ import com.practicaldime.zesty.view.ViewEngine;
 public class HandlerResponse extends HttpServletResponseWrapper implements RouteResponse {
 
 	private final Logger LOG = LoggerFactory.getLogger(HandlerResponse.class);
-	protected byte[] content = new byte[0];
+	protected ByteBuffer content;
 	protected boolean redirect = false;
 	protected boolean forward = false;
 	protected String routeUri;
@@ -88,24 +89,29 @@ public class HandlerResponse extends HttpServletResponseWrapper implements Route
 
 	@Override
 	public void send(String payload) {
-		this.content = payload.getBytes(StandardCharsets.UTF_8);
+		this.content = ByteBuffer.wrap(payload.getBytes(StandardCharsets.UTF_8));
 	}
 	
 	@Override
-	public void bytes(byte[] payload) {
+	public void send(byte[] payload) {
+		this.content = ByteBuffer.wrap(payload);
+	}
+	
+	@Override
+	public void send(ByteBuffer payload) {
 		this.content = payload;
 	}
 
 	@Override
 	public void json(Object payload) {
 		setContentType("application/json");
-		this.content = new Gson().toJson(payload).getBytes(StandardCharsets.UTF_8);
+		this.content = ByteBuffer.wrap(new Gson().toJson(payload).getBytes(StandardCharsets.UTF_8));
 	}
 
 	@Override
 	public void jsonp(Object payload) {
 		setContentType("application/json");
-		this.content = new Gson().toJson(payload).getBytes(StandardCharsets.UTF_8);
+		this.content = ByteBuffer.wrap(new Gson().toJson(payload).getBytes(StandardCharsets.UTF_8));
 	}
 
 	@Override
@@ -120,23 +126,23 @@ public class HandlerResponse extends HttpServletResponseWrapper implements Route
 		} catch (JAXBException e) {
 			LOG.error("Could not transform content to response body");
 		}
-		this.content = bytes.toByteArray();
+		this.content = ByteBuffer.wrap(bytes.toByteArray());
 	}
 
 	@Override
 	public <T> void content(T payload, BodyWriter<T> writer) {
 		byte[] bytes = writer.transform(payload);
 		setContentLength(bytes.length);
-		this.content = bytes;
+		this.content = ByteBuffer.wrap(bytes);
 	}
 
 	@Override
 	public void render(String template, Map<String, Object> model) {
 		ViewEngine engine = AppServer.engine();
 		try {
-			this.content = engine.merge(template, model).getBytes(StandardCharsets.UTF_8);
+			this.content = ByteBuffer.wrap(engine.merge(template, model).getBytes(StandardCharsets.UTF_8));
 		} catch (Exception e) {
-			this.content = e.getMessage().getBytes(StandardCharsets.UTF_8);
+			this.content = ByteBuffer.wrap(e.getMessage().getBytes(StandardCharsets.UTF_8));
 			setStatus(SC_NOT_ACCEPTABLE);
 		}
 	}
@@ -210,7 +216,7 @@ public class HandlerResponse extends HttpServletResponseWrapper implements Route
 			send(ex.getMessage());
 			return;
 		}
-		this.content = baos.toByteArray();
+		this.content = ByteBuffer.wrap(baos.toByteArray());
 
 		if (status != null) {
 			status.send();
@@ -219,7 +225,7 @@ public class HandlerResponse extends HttpServletResponseWrapper implements Route
 
 	@Override
 	public byte[] getContent() {
-		return this.content;
+		return this.content.array();
 	}
 
 	@Override

@@ -72,9 +72,8 @@ public abstract class HandlerServletAsync extends HttpServlet {
 		ServletInputStream input = req.getInputStream();
 		HandlerAction<ByteBuffer, RequestContext> action = data -> {
 			RequestContext context = new RequestContext(req, resp, async);
-			context.set("DATA", data);
-			LOG.info("*********doProcess(): starting chain for {}", req.getRequestURI());			
-			//return CompletableFuture.supplyAsync(() -> context).thenCompose(ctx -> handler(ctx));
+			context.getReq().body = data.array();
+			LOG.info("*********doProcess(): starting chain for {} and then handler thereafter", req.getRequestURI());			
 			return chain.start(context).thenCompose(ctx -> handler(ctx));
 		};
 

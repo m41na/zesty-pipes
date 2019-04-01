@@ -19,7 +19,7 @@ public class HelloAction extends AbstractMiddleware<RequestContext> {
 		CompletableFuture<RequestContext> future = new CompletableFuture<>();
 		String data = "Hello data from apply()!!!!!";
 		System.out.println("****** data is ready for response: " + data);
-		context.set("DATA", ByteBuffer.wrap(data.getBytes()));
+		context.getResp().send(data.getBytes());
 		//future.complete(context);
 		future.completeExceptionally(new RuntimeException("****Hello action error"));
 		return future;
