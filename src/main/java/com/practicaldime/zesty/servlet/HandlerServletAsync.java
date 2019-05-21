@@ -21,8 +21,9 @@ public abstract class HandlerServletAsync extends HttpServlet {
 	
 	private static final Logger LOG = LoggerFactory.getLogger(HandlerServletAsync.class);
 
-	public abstract CompletableFuture<RequestContext> handler(RequestContext context);
 	private final MiddlewareChain<RequestContext> chain;
+
+	public abstract CompletableFuture<RequestContext> handler(RequestContext context);
 
 	public HandlerServletAsync(MiddlewareChain<RequestContext> chain) {
 		super();

@@ -10,7 +10,7 @@
 		</encoder>
 	</appender>
 
-	<logger name="com.practicaldime.zesty" level="DEBUG" />
+	<logger name="com.practicaldime.zesty" level="INFO" />
 	<logger name="org.eclipse.jetty" level="WARN" />
 
 	<root level="debug">
