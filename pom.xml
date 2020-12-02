@@ -14,7 +14,7 @@
 	<properties>
 		<project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 		<java.version>1.9</java.version>
-		<jetty.version>9.4.14.v20181114</jetty.version>
+		<jetty.version>9.4.35.v20201120</jetty.version>
 		<graalvm.version>1.0.0-rc14</graalvm.version>
 	</properties>
 
